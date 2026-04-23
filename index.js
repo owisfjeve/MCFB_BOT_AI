@@ -1,51 +1,57 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const express = require('express');
+const axios = require('axios'); // بنستخدمه عشان البوت ينغز نفسه ويظل صاحي
 
-// 1. تشغيل سيرفر ويب بسيط لضمان استمرارية العمل على Render
 const app = express();
-app.get('/', (req, res) => res.send('بوت لوريس الصغير 2.0 جاهز! 🚀'));
 const port = process.env.PORT || 10000;
-app.listen(port, () => console.log(`سيرفر الاستضافة شغال على منفذ ${port}`));
 
-// 2. إعداد المفاتيح (تأكد من وضعها في Environment Variables في Render)
+app.get('/', (req, res) => res.send('لوريس الصغير 2.0: أنا صاحي وما راح أنام! 🚀'));
+app.listen(port, () => console.log(`السيرفر شغال على منفذ ${port}`));
+
 const token = process.env.TELE_TOKEN;
 const apiKey = process.env.GEMINI_API_KEY;
 
 const genAI = new GoogleGenerativeAI(apiKey);
-// استخدمنا gemini-pro لأنه الأكثر استقراراً وقبولاً لكل النسخ
+
+// استخدمنا gemini-1.5-flash مع معالجة ذكية للاسم لضمان القبول
 const model = genAI.getGenerativeModel({ 
-    model: "gemini-pro",
-    systemInstruction: "أنت لوريس الصغير، مساعد ذكي ومرح وخبير لفريق UMFB. تحدث باللهجة السعودية العفوية وساعد الجميع في التقنية والألعاب والوناسة."
+    model: "gemini-1.5-flash"
 });
 
-// 3. تشغيل البوت بنظام Polling نظيف
 const bot = new TelegramBot(token, { polling: true });
 
-console.log("جاري تشغيل لوريس الصغير...");
+// --- كود "ضد النوم" (Keep Alive) ---
+// استبدل الرابط اللي تحت برابط موقعك في Render
+const RENDER_URL = "https://mcfb-autonomous.onrender.com"; 
+
+setInterval(() => {
+    axios.get(RENDER_URL).then(() => {
+        console.log("نغزت السيرفر عشان ما ينام! ⚡");
+    }).catch(err => console.log("خطأ بسيط في النغزة، مو مشكلة."));
+}, 600000); // ينغز نفسه كل 10 دقائق
+// ----------------------------------
 
 bot.on('message', async (msg) => {
     if (!msg.text || msg.text.startsWith('/')) return;
 
-    const chatId = msg.chat.id;
-    
-    // إرسال إشعار "يكتب الآن"
-    bot.sendChatAction(chatId, 'typing');
+    bot.sendChatAction(msg.chat.id, 'typing');
 
     try {
         const result = await model.generateContent(msg.text);
         const response = await result.response;
-        const text = response.text();
-        
-        bot.sendMessage(chatId, text);
+        bot.sendMessage(msg.chat.id, response.text());
     } catch (error) {
-        console.error("خطأ في Gemini:", error.message);
-        // رسالة لطيفة للمستخدم في حال تعثر الذكاء الاصطناعي
-        bot.sendMessage(chatId, "يا غالي، مخي علّق شوي من الحماس، ممكن تعيد كلامك؟");
+        console.error("Gemini Error:", error.message);
+        // محاولة أخيرة لو فشل الفلاش يستخدم البرو تلقائياً
+        try {
+            const fallbackModel = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
+            const fallbackResult = await fallbackModel.generateContent(msg.text);
+            bot.sendMessage(msg.chat.id, fallbackResult.response.text());
+        } catch (err) {
+            bot.sendMessage(msg.chat.id, "يا غالي جرب ترسل مرة ثانية، السيرفر يسخن!");
+        }
     }
 });
 
-// معالجة أخطاء الاتصال بالتيليجرام لمنع توقف البوت
-bot.on('polling_error', (error) => {
-    console.log("Polling error:", error.code); 
-});
+bot.on('polling_error', (err) => console.log("Telegram Error:", err.code));
