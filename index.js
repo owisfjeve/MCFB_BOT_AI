@@ -1,57 +1,44 @@
 const TelegramBot = require('node-telegram-bot-api');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const express = require('express');
-const axios = require('axios'); // بنستخدمه عشان البوت ينغز نفسه ويظل صاحي
+const axios = require('axios');
 
 const app = express();
-const port = process.env.PORT || 10000;
-
-app.get('/', (req, res) => res.send('لوريس الصغير 2.0: أنا صاحي وما راح أنام! 🚀'));
-app.listen(port, () => console.log(`السيرفر شغال على منفذ ${port}`));
+app.get('/', (req, res) => res.send('لوريس الصغير: أنا صاحي وجاهز! 🚀'));
+app.listen(process.env.PORT || 10000);
 
 const token = process.env.TELE_TOKEN;
 const apiKey = process.env.GEMINI_API_KEY;
 
+// تحديد الإصدار v1 لضمان الاستقرار
 const genAI = new GoogleGenerativeAI(apiKey);
-
-// استخدمنا gemini-1.5-flash مع معالجة ذكية للاسم لضمان القبول
-const model = genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash"
-});
 
 const bot = new TelegramBot(token, { polling: true });
 
-// --- كود "ضد النوم" (Keep Alive) ---
-// استبدل الرابط اللي تحت برابط موقعك في Render
-const RENDER_URL = "https://mcfb-autonomous.onrender.com"; 
-
-setInterval(() => {
-    axios.get(RENDER_URL).then(() => {
-        console.log("نغزت السيرفر عشان ما ينام! ⚡");
-    }).catch(err => console.log("خطأ بسيط في النغزة، مو مشكلة."));
-}, 600000); // ينغز نفسه كل 10 دقائق
-// ----------------------------------
-
 bot.on('message', async (msg) => {
     if (!msg.text || msg.text.startsWith('/')) return;
-
     bot.sendChatAction(msg.chat.id, 'typing');
 
     try {
+        // نستخدم الموديل المستقر جداً gemini-1.5-flash
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        
         const result = await model.generateContent(msg.text);
-        const response = await result.response;
-        bot.sendMessage(msg.chat.id, response.text());
+        const text = result.response.text();
+        bot.sendMessage(msg.chat.id, text);
     } catch (error) {
-        console.error("Gemini Error:", error.message);
-        // محاولة أخيرة لو فشل الفلاش يستخدم البرو تلقائياً
+        console.error("Error Details:", error.message);
+        
+        // إذا فشل، نحاول بطريقة الـ API المباشرة (خطة إنقاذ)
         try {
-            const fallbackModel = genAI.getGenerativeModel({ model: "gemini-1.0-pro" });
-            const fallbackResult = await fallbackModel.generateContent(msg.text);
-            bot.sendMessage(msg.chat.id, fallbackResult.response.text());
+            const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+            const response = await axios.post(fallbackUrl, {
+                contents: [{ parts: [{ text: msg.text }] }]
+            });
+            const fallbackText = response.data.candidates[0].content.parts[0].text;
+            bot.sendMessage(msg.chat.id, fallbackText);
         } catch (err) {
-            bot.sendMessage(msg.chat.id, "يا غالي جرب ترسل مرة ثانية، السيرفر يسخن!");
+            bot.sendMessage(msg.chat.id, "يا غالي، جوجل مسوية زحمة على السيرفر، جرب ترسل بعد ثواني.");
         }
     }
 });
-
-bot.on('polling_error', (err) => console.log("Telegram Error:", err.code));
